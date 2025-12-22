@@ -1,0 +1,111 @@
+# MP-STGAT 训练配置文件
+
+# ==================== GPU配置 ====================
+gpu:
+  # 使用的GPU编号列表，如 [0, 1, 2] 表示使用前3张GPU
+  device_ids: [0, 1, 2]
+  # 是否启用分布式训练（多GPU并发）
+  distributed: true
+  # 主GPU设备ID
+  main_device: 0
+
+# ==================== 数据集配置 ====================
+data:
+  # 数据集路径 (可选: PEMS03, PEMS04, PEMS07, PEMS08)
+  traffic_file: 'data/PEMS08/PEMS08.npz'
+  # 训练/验证/测试集划分比例
+  # 保持标准划分以便与其他模型公平对比
+  train_ratio: 0.6    # 标准6:2:2划分
+  val_ratio: 0.2
+  test_ratio: 0.2
+  # 批次大小（减小batch_size提高更新频率，增强稳定性）
+  batch_size: 64
+
+# ==================== 模型配置 ====================
+model:
+  # 输入特征维度 [flow, time_of_day, day_of_week]
+  input_dim: 3
+  # 历史时间步数 (P * 5分钟)
+  # 保持标准12步(60分钟)以便与其他模型公平对比
+  P: 12               # 标准配置
+  # 预测时间步数 (Q * 5分钟)
+  Q: 12
+  # 一天的时间步数 (288 = 24小时 * 12个5分钟)
+  T: 288
+  # STAttBlock层数
+  L: 1
+  # 注意力头数
+  K: 4
+  # 每个注意力头的维度
+  # 优化: 增大注意力容量 (总容量=K×d=8×16=128)
+  d: 32               # 原8 → 16
+  # 节点嵌入维度
+  # 优化: PEMS08有170个节点,embed_dim=32足够表达节点特征(sqrt(170)≈13)
+  embed_dim: 64       # 原1 → 32 ⭐关键优化⭐
+  # 跳跃连接维度
+  skip_dim: 256
+
+# ==================== 训练配置 ====================
+training:
+  # 最大训练轮数
+  max_epoch: 400
+  # 早停耐心值
+  # 优化: 模型更复杂,需要更多epoch才能收敛
+  patience: 50         # 原50 → 80
+  # 初始学习率
+  # 优化: 降低学习率以获得更稳定的训练
+  learning_rate: 0.001
+  # 梯度裁剪阈值
+  clip_grad: 5
+  # 损失函数 (mae, mse, masked_mae, huber)
+  # 优化: Huber损失对离群点更鲁棒,适合交通数据中的异常值
+  loss_func: 'masked_mae'    # 原'masked_mae' → 'huber'
+
+  # 时间步加权损失 (对未来步赋予更高权重,改善长期预测)
+  use_temporal_weighting: false  # 是否启用时间步加权
+  temporal_weight_scheme: 'progressive'  # 权重方案: progressive, linear, exponential
+  # progressive: 前4步1.0, 中4步1.2, 后4步1.5
+  # linear: 从1.0线性增长到2.0
+  # exponential: 从1.0指数增长到1.5
+
+  # 学习率衰减配置 (使用CosineAnnealing提供平滑衰减)
+  use_cosine_annealing: false
+  lr_decay: false
+  lr_decay_rate: 0.3
+  lr_decay_step: '5,20,40,70'
+  # StepLR参数 (当use_cosine_annealing=false时使用)
+  step_size: 100
+  gamma: 0.9
+
+  # 正则化配置 (增强泛化能力，减少过拟合)
+  # 优化: 降低weight_decay避免欠拟合,增加dropout防止过拟合
+  weight_decay: 0.00005  # 原0.0002 → 0.0001
+  dropout: 0.1         # 原0.1 → 0.15
+
+  # 学习率预热 (前N个epoch逐步提升学习率)
+  # 优化: 模型更复杂,延长warmup期
+  warmup_epochs: 15     # 原10 → 15
+
+# ==================== 日志与保存 ====================
+logging:
+  # 日志文件保存目录
+  log_dir: './logs'
+  # TensorBoard日志目录
+  tensorboard_dir: './runLog/mpgat'
+  # 每隔多少个epoch打印一次
+  verbose: 1
+
+saving:
+  # 模型保存目录
+  model_dir: './saved_models'
+  # 是否保存最佳模型
+  save_best: true
+
+# ==================== 其他配置 ====================
+misc:
+  # 随机种子
+  seed: 42
+  # 时间片长度（分钟）
+  time_slot: 5
+  # 是否使用混合精度训练（节省显存）
+  use_amp: false
