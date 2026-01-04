@@ -1,0 +1,170 @@
+# BridgedSTGNN跨域迁移配置文件
+# 用于 PeMS07 → PeMS03/04/08 的流量预测迁移
+
+# ========== 数据集配置 ==========
+data:
+  source_dataset: 'PEMS07'  # 源域 (883节点)
+  target_dataset: 'PEMS03'  # 目标域 (358节点)
+  data_dir: 'data'
+
+  # 时间窗配置
+  P: 12  # 历史窗口长度 (12*5min = 1小时)
+  Q: 12  # 预测窗口长度 (12*5min = 1小时)
+
+  # DataLoader配置
+  batch_size: 64
+  num_workers: 4
+  pin_memory: true
+
+# ========== 模型配置 ==========
+model:
+  # Embedding维度
+  embed_dim: 128
+  hidden_dim: 128
+
+  # 源域预训练模型
+  source_model_path: 'saved_models/pems07_gman_best.pth'
+  source_model_type: 'GMAN'  # 或 'STGNN', 'GCN'
+
+  # 采样器配置
+  use_advanced_sampler: true  # 使用高级时空采样器 (周期感知)
+  sampler:
+    delta_t_pos: 2   # 时间邻近窗口 (±2步)
+    delta_t_neg: 12  # 时间远离阈值 (>12步)
+    use_augmentation: true  # 启用数据增强
+
+  # 桥接图配置
+  topk: 8  # 每个节点的邻居数
+
+  # GNN配置
+  gnn_layers: 3
+  dropout: 0.1
+
+# ========== AKR阶段配置 (对比学习 + 域对抗) ==========
+akr:
+  epochs: 100
+  learning_rate: 0.001
+  optimizer: 'Adam'
+  weight_decay: 1e-5
+
+  # 损失权重
+  loss_weights:
+    nce: 1.0           # InfoNCE对比损失
+    nce_cross: 0.3     # 跨域对比损失
+    adversarial: 0.1   # 域对抗损失
+    mmd: 0.05          # MMD对齐损失
+
+  # 对比学习配置
+  contrastive:
+    temperature: 0.1   # 温度系数
+    num_pos: 4         # 每个anchor的正样本数
+    num_neg: 8         # 每个anchor的负样本数
+    strategy: 'mixed'  # 采样策略: 'neighborhood'|'periodic'|'mixed'
+    use_cross_domain: true  # 启用跨域对比
+
+  # 域对抗配置
+  adversarial:
+    lambda_schedule: 'progressive'  # 'fixed'|'progressive'
+    lambda_max: 1.0
+    warmup_epochs: 50  # 前50个epoch线性增长
+
+  # 早停配置
+  early_stopping:
+    metric: 'mmd'      # 监控指标
+    threshold: 0.1     # MMD阈值
+    min_epochs: 20     # 最少训练轮数
+    patience: 20       # 容忍轮数
+
+# ========== GKT阶段配置 (桥接图 + 回归) ==========
+gkt:
+  epochs: 50
+  learning_rate: 0.0005
+  optimizer: 'Adam'
+  weight_decay: 1e-5
+
+  # 损失函数
+  loss_function: 'mse'  # 'mse'|'mae'|'huber'
+
+  # 早停配置
+  early_stopping:
+    metric: 'val_mae'
+    mode: 'min'
+    patience: 10
+
+# ========== 训练配置 ==========
+training:
+  # 设备配置
+  device: 'cuda:0'
+  use_amp: false  # 混合精度训练
+
+  # 梯度裁剪
+  grad_clip: 1.0
+
+  # 学习率调度
+  lr_scheduler:
+    type: 'ReduceLROnPlateau'  # 'StepLR'|'CosineAnnealingLR'|'ReduceLROnPlateau'
+    patience: 10
+    factor: 0.5
+    min_lr: 1e-6
+
+  # 验证配置
+  val_interval: 1  # 每隔多少epoch验证一次
+
+  # 保存配置
+  save_dir: 'saved_models'
+  save_best_only: true
+  save_checkpoint_interval: 10
+
+# ========== 日志配置 ==========
+logging:
+  log_dir: 'logs'
+  tensorboard: true
+  wandb: false
+
+  # 打印配置
+  print_interval: 10  # 每隔多少batch打印一次
+
+  # 可视化配置
+  visualize:
+    tsne_interval: 20  # 每隔多少epoch可视化embedding
+    plot_loss: true
+    plot_mmd: true
+
+# ========== 实验配置 ==========
+experiment:
+  name: 'bridged_07to03_v1'
+  seed: 42
+  deterministic: true
+
+  # 消融实验
+  ablation:
+    no_adversarial: false  # 禁用域对抗
+    no_cross_domain: false # 禁用跨域对比
+    no_periodic: false     # 禁用周期感知
+    simple_sampler: false  # 使用简化采样器
+
+# ========== 迁移任务预设 ==========
+# 取消下面的注释来快速切换任务
+
+# # PeMS07 → PeMS04
+# data:
+#   source_dataset: 'PEMS07'
+#   target_dataset: 'PEMS04'
+
+# # PeMS07 → PeMS08
+# data:
+#   source_dataset: 'PEMS07'
+#   target_dataset: 'PEMS08'
+
+# ========== 快速测试配置 (调试用) ==========
+# 取消下面的注释来快速测试
+
+# data:
+#   batch_size: 16
+# akr:
+#   epochs: 10
+# gkt:
+#   epochs: 5
+# model:
+#   embed_dim: 64
+#   topk: 4
